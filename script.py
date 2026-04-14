@@ -13,8 +13,8 @@ def set_connection():
         port=os.getenv("DB_PORT")
     )
 
-def get_events_templates(cursor):
-        query = "SELECT * FROM events"
+def get_data(cursor, table):
+        query = f"SELECT * FROM {table}"
         cursor.execute(query)
         return cursor.fetchall()
 
@@ -28,7 +28,7 @@ def get_event_id(events_templates, content):
         t_id = template[0]
         t_text = template[1]
     
-        if not t_text or t_text == 'None':
+        if not t_text or t_text == 'Other':
             continue
                 
         log_match = re.search(t_text, content)
@@ -37,49 +37,63 @@ def get_event_id(events_templates, content):
         
     return 28 #default
 
-def convert_log(log_dict, events_templates):
+def get_component(component_name, components):
+    for component in components:
+        if component_name == component[1]:
+            return component[0]
+    return 2 #default
+
+def convert_log(log_dict, events_templates, components):
     date = convert_date(2025, log_dict['month'], log_dict['day'], log_dict['time'])
     event_id = get_event_id(events_templates, log_dict["content"].strip())
+    component_id = get_component(log_dict['component'], components)
 
     return {
         "date": date,
         "pid": int(log_dict["pid"]),
         "content": log_dict["content"],
-        "event_id": event_id
+        "event_id": event_id,
+        "component_id": component_id
     }
 
 def insert_log(cursor, log_converted):
-    query = "INSERT INTO logs(log_date, log_pid, log_content, event_id) VALUES (%s, %s, %s, %s)"
+    query = "INSERT INTO logs(log_date, log_pid, log_content, event_id, component_id) VALUES (%s, %s, %s, %s, %s)"
     cursor.execute(query, (
         log_converted["date"], 
         log_converted["pid"], 
         log_converted["content"], 
-        log_converted["event_id"]
+        log_converted["event_id"],
+        log_converted["component_id"]
     )) 
 
 load_dotenv()
 events_templates = []
+components = []
 pattern = r"(?P<month>\w{3})\s+(?P<day>\d+)\s+(?P<time>\d{2}:\d{2}:\d{2})\s+(?P<component>\w+)\s+sshd\[(?P<pid>\d+)\]:\s+(?P<content>.*)"
-log_path = "" # SET LOG HERE
+log_path = "SSH.log" # SET LOG HERE
 
 try:
     conn = set_connection()
     
     with conn.cursor() as cursor:
-        events_templates = get_events_templates(cursor) 
+        print("Moving data...") 
+        events_templates = get_data(cursor, "events")
+        components = get_data(cursor, "components") 
 
         with open(log_path) as logs:
             for log in logs:
                 log_match = re.search(pattern, log)
                 if log_match:
                     log_dict = log_match.groupdict()
-                    log_converted = convert_log(log_dict, events_templates)
+                    log_converted = convert_log(log_dict, events_templates, components)
                     insert_log(cursor, log_converted)
 
         conn.commit()
-        print("All data moved successfully!")            
+        print("All data has been successfully moved!")            
 except Exception as error:
     print(f"Error: {error}")
 finally:
     if conn:
         conn.close()
+
+#TODO: Improve the events table to search for all events 
